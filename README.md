@@ -106,11 +106,6 @@ The interactive dashboard includes:
 - Holiday impact analysis
 - Quarterly trend with DAX
 
-### 🔹 Preview  
-<img src="dashboard/dashboard_preview.png" width="700"/>
-
-Download the full dashboard here:  
- `dashboard/walmart_dashboard.pbix`
 
 ---
 
