@@ -1,1 +1,262 @@
 sql/walmart_analysis.sql
+  
+create database Inventory_Control_Management;
+-- Preview data 
+select * from walmart;
+-- Create a staging table
+create table walmart_Staging
+as select * from walmart;
+-- Preview Staging table
+select * from walmart_Staging;
+
+-- Quality check: Completeness, Accuracy, Uniqueness and Consistency
+-- Check fFor missing values
+select 
+sum(case when Store is null then 1 else 0 end) as Missing_Store,
+sum(case when Date is null then 1 else 0 end) as Missing_Date,
+sum(case when Weekly_Sales is null then 1 else 0 end) as Missing_Weekly_Sales,
+sum(case when Holiday_Flag is null then 1 else 0 end) as Missing_Holiday_Flag,
+sum(case when Temperature is null then 1 else 0 end) as Missing_Temperature,
+sum(case when Fuel_Price is null then 1 else 0 end) as Missing_Fuel_Price,
+sum(case when CPI is null then 1 else 0 end) as Missing_CPI,
+sum(case when Unemployment is null then 1 else 0 end) as Missing_Unemployment
+from walmart_Staging;
+
+-- Check for Duplicates
+select Store,
+Date,
+Weekly_Sales,
+Holiday_Flag,
+Temperature,
+Fuel_Price,
+CPI,
+Unemployment,
+count(*) as Duplicate_Count
+from walmart_Staging
+group by  Store,Date,Weekly_Sales,Holiday_Flag,Temperature,Fuel_Price,CPI,Unemployment
+having count(*) >1;
+
+-- Check for Validity of Numerical values
+select Weekly_Sales,Temperature,Fuel_Price,CPI,Unemployment from walmart_Staging
+where Weekly_Sales <=0 
+or Fuel_Price<=0 
+or CPI<=0 
+or Unemployment<=0;
+
+-- Check for outliers
+select* from walmart_Staging
+where Weekly_Sales>(select avg(Weekly_Sales)+ 3*STDDEV(Weekly_Sales)from walmart_Staging);
+
+-- Confirm data types
+describe walmart_Staging;
+
+-- Change Date to a Date data type
+select distinct Date  from walmart_Staging;
+
+-- add a date column
+alter table walmart_Staging
+ add column Date_Cleaned date;
+ 
+ --  Replace all '-' with '/' so the format is consistent
+
+  update  walmart_Staging
+  set Date = replace(Date,'-','/');
+  
+   -- Update Date_Cleaned column
+   
+ update   walmart_Staging
+ set Date_Cleaned = str_to_date(Date,'%d/%m/%Y');
+ 
+ -- drop the date column(it has text data type)
+ alter table  walmart_Staging
+ drop column Date;
+ -- Renaming Date_Cleaned to Date
+ alter table  walmart_Staging
+ change column Date_Cleaned Date date;
+ -- Confirm data
+ 
+ select*from walmart;
+ select* from walmart_staging;
+-- Our data appears to have passed the quality test.
+select * from walmart_Staging;
+-- Which year had the highest sales?
+select year(Date) as Year,
+round(sum(Weekly_Sales),2) as Sales
+from walmart_Staging
+group by Year
+order by Sales desc
+limit 1;
+ -- 2011 Had the highest Sales
+-- How was the weather during the year of the highest sales?
+
+select year(Date) as Year,Temperature,
+round(sum(Weekly_Sales),2) as Sales
+from walmart_Staging
+group by Year,Temperature
+order by Sales desc
+limit 5;
+-- Determine whether the weather has a significant impact on sales.
+select Temperature ,
+round(sum(Weekly_Sales),2) as Sales
+from walmart_Staging
+group by Temperature
+order by Sales desc
+limit 10;
+      -- We can see that most sales are hapenning the temp are mild not too hot and not too cold a range of 46-76
+ select Temperature ,
+round(sum(Weekly_Sales),2) as Sales
+from walmart_Staging
+group by Temperature
+order by Sales asc
+limit 10 ;
+
+
+
+
+     -- We can see that less sales happens when it is too hot ,exemption of 52.91,61.95,56.62 out of 10.    
+     
+-- Do sales always rise near the holiday season every year?
+select Holiday_Flag, year(Date) as Year,month(Date) as Month,
+round(sum(Weekly_Sales),2) as Sales
+from walmart_Staging
+group by Holiday_Flag,Year,Month
+order by Month ;
+        -- November picks during holidays
+-- Analyze the relationship between sales and the different macroeconomic variables in the dataset.
+select round(avg(Fuel_Price),2) As Avg_Fuel,
+round(avg(CPI),2) as Avg_CPI,
+round(avg(Unemployment ),2) as Avg_Unemployment,
+round(sum(Weekly_Sales),2) as Sales 
+from walmart_Staging
+group by  Fuel_Price,CPI,Unemployment 
+order by Sales desc;
+
+-- Total sales across all stores
+select Store, 
+round(sum(Weekly_Sales),2) as Sales
+from walmart_Staging
+group by Store
+order by Sales desc;
+-- Top 5 stores by total weekly sales
+select Store, 
+round(sum(Weekly_Sales),2) as Sales
+from walmart_Staging
+group by Store
+order by Sales
+limit 5;
+-- Average weekly sales for holiday vs. non-holiday weeks
+select Holiday_Flag,
+round(avg(Weekly_Sales)) as AverageWeekly_Sales
+from walmart_Staging
+group by  Holiday_Flag
+order by  AverageWeekly_Sales desc
+;
+
+-- Average fuel price and unemployment rate trends
+select round(avg(Fuel_Price),2) as AvgFuel_Price,
+Unemployment from walmart_Staging
+group by Unemployment
+order by AvgFuel_Price desc;
+
+-- Highest/lowest CPI periods
+select max(CPI) as highestCPI, min(CPI) as LowestCPI from walmart_Staging;
+
+-- Rolling averages
+select Weekly_Sales , store,
+avg(Weekly_Sales) over(partition by store  order by Date) as Rolling_averages
+
+from walmart_Staging;
+
+
+-- Monthly summaries
+select round(sum(Weekly_Sales),2) as Sales,
+year(Date) as Year,
+month(Date) as Monthly 
+from walmart_Staging
+group by Monthly ,Year
+order by Monthly;
+
+-- Rankings (e.g., top-performing stores)
+select* from
+(select Store, 
+round(sum(Weekly_Sales),2) as Sales,
+rank()over( order by round(sum(Weekly_Sales),2) desc) as StoreRank
+from walmart_Staging
+group by Store)s
+having StoreRank <5;
+
+
+-- Correlation hints (does high fuel price lower sales?)
+select Fuel_Price,Weekly_Sales 
+from walmart_Staging
+order by Fuel_Price desc
+limit 10;
+
+select Fuel_Price,Weekly_Sales 
+from walmart_Staging
+order by Fuel_Price asc
+limit 10
+;
+-- It seems like when fuel price are high, weekly sales are hight too
+
+-- Identify high-performing stores relative to the national average.
+
+select Store,
+       round(sum(Weekly_Sales),2) as Total_Sales
+from walmart_Staging
+group by Store
+having sum(Weekly_Sales) > (
+    select avg(Total_Sales)
+    from (
+        select sum(Weekly_Sales) as Total_Sales
+        from walmart_Staging
+        group by Store
+    ) as StoreSales
+)
+order by Total_Sales desc;
+-- Rank stores by sales and see how each contributes cumulatively to total revenue.
+select Store, 
+round(sum(Weekly_Sales),2) as Sales,
+row_number() over( order by round(sum(Weekly_Sales),2) desc)as StoreRank,
+round(sum(sum(Weekly_Sales)) over(order by sum(Weekly_Sales) desc),2) as CumulativeSales
+from walmart_Staging
+group by store
+order by StoreRank;
+
+-- Correlation & Insight Query
+select  
+case
+when Unemployment < 6  then 'Low_Unemploymet'
+when Unemployment between 6 and 8 then 'Medium_Unemployment'
+else 'High_Employment'
+end as Unemployment_Level,
+
+round(avg(Weekly_Sales),2) as AverageSales,
+count(*) as Records
+from walmart_Staging
+group by Unemployment_Level;
+
+-- Group stores by performance category.
+select store,
+round(sum(Weekly_Sales),2) as Sales,
+case
+when round(sum(Weekly_Sales),2) >5000000 then 'TopPerformer'
+when round(sum(Weekly_Sales),2) between 3000000 and 5000000 then 'AveragePerformer'
+else 'LowPerforme'
+end as Performance_Category
+from walmart_Staging
+group by  store;
+-- analyze sales trends by quarter using a CTE
+with quarterly_sales as (
+  select year(Date) as Year,
+         quarter(Date) as Quarter,
+         sum(Weekly_Sales) as Total_Sales
+  from walmart_Staging
+  group by Year, Quarter
+)
+select *,
+       lag(Total_Sales) over(order by Year, Quarter) as Prev_Quarter_Sales,
+       round(((Total_Sales - lag(Total_Sales) over(order by Year, Quarter)) / lag(Total_Sales) over(order by Year, Quarter)) * 100,2) as Growth_Percentage
+from quarterly_sales;
+
+
